@@ -27,7 +27,6 @@ app.add_middleware(
 )
 
 async def get_access_token(refresh_token: str) -> str:
-    """Renova o access token a partir do refresh token."""
     creds = Credentials(
         token=None,
         refresh_token=refresh_token,
@@ -39,7 +38,6 @@ async def get_access_token(refresh_token: str) -> str:
     return creds.token
 
 async def discover_customer_id(access_token: str) -> str:
-    """Chama customers:listAccessibleCustomers para descobrir o primeiro customer_id."""
     url = f"https://googleads.googleapis.com/{API_VERSION}/customers:listAccessibleCustomers"
     headers = {
         "Authorization":   f"Bearer {access_token}",
@@ -51,16 +49,13 @@ async def discover_customer_id(access_token: str) -> str:
             text = await resp.text()
             logging.debug(f"[discover] status={resp.status}, body={text}")
             if resp.status != 200:
-                raise HTTPException(status_code=502, detail=f"Erro ao listar contas: {text}")
-            body = json.loads(text)
-            names = body.get("resourceNames", [])
+                raise HTTPException(502, f"Erro ao listar contas: {text}")
+            names = json.loads(text).get("resourceNames", [])
             if not names:
-                raise HTTPException(status_code=502, detail="Nenhuma conta acessível encontrada.")
-            # resourceNames: ["customers/1234567890", ...]
+                raise HTTPException(502, "Nenhuma conta acessível encontrada.")
             return names[0].split("/")[-1]
 
 async def mutate_campaign_status(customer_id: str, campaign_id: str, status: str, access_token: str):
-    """Usa CampaignService.mutate para atualizar o status da campanha."""
     url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{customer_id}/campaigns:mutate"
     headers = {
         "Authorization":   f"Bearer {access_token}",
@@ -78,98 +73,63 @@ async def mutate_campaign_status(customer_id: str, campaign_id: str, status: str
             }
         ]
     }
-    logging.debug(f"[mutate] POST {url} body={json.dumps(body)}")
+    logging.debug(f"[mutate] POST {url}")
+    logging.debug(f"[mutate] body={json.dumps(body)}")
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=body) as resp:
             text = await resp.text()
             logging.debug(f"[mutate] status={resp.status}, body={text}")
             if resp.status != 200:
-                raise HTTPException(status_code=resp.status, detail=text)
-            return json.loads(text)
-
-async def get_campaign_status(customer_id: str, campaign_id: str, access_token: str) -> str:
-    """
-    Busca o status atual da campanha via googleAds:search.
-    Retorna o enum exato do Google Ads: ENABLED, PAUSED, REMOVED, etc.
-    """
-    url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{customer_id}/googleAds:search"
-    headers = {
-        "Authorization":   f"Bearer {access_token}",
-        "developer-token": DEVELOPER_TOKEN,
-        "Content-Type":    "application/json"
-    }
-    query = (
-        "SELECT campaign.status "
-        f"FROM campaign "
-        f"WHERE campaign.id = {campaign_id} "
-        "LIMIT 1"
-    )
-    body = {"query": query}
-    logging.debug(f"[get_status] POST {url} body={body}")
-    async with aiohttp.ClientSession() as sess:
-        async with sess.post(url, headers=headers, json=body) as resp:
-            text = await resp.text()
-            logging.debug(f"[get_status] status={resp.status}, body={text}")
-            if resp.status != 200:
-                raise HTTPException(status_code=502, detail=f"Erro ao buscar status: {text}")
-            data = json.loads(text)
-            results = data.get("results", [])
-            if not results:
-                raise HTTPException(status_code=404, detail="Campanha não encontrada.")
-            return results[0]["campaign"]["status"]
+                raise HTTPException(resp.status, f"Erro ao mutar status: {text}")
+            return await resp.json()
 
 @app.post("/pause_google_campaign")
 async def pause_google_campaign(payload: dict = Body(...)):
+    """
+    Pausa uma campanha definindo explicitamente status = 'PAUSED'.
+    """
     logging.debug(f"[pause] Payload: {json.dumps(payload)}")
     refresh_token = payload.get("refresh_token")
     campaign_id   = payload.get("campaign_id")
     if not refresh_token or not campaign_id:
-        raise HTTPException(status_code=400, detail="É necessário 'refresh_token' e 'campaign_id'.")
+        raise HTTPException(400, "É necessário 'refresh_token' e 'campaign_id'.")
 
     access_token = await get_access_token(refresh_token)
     customer_id  = payload.get("customer_id") or await discover_customer_id(access_token)
 
-    # 1) Envia o mutate para PAUSED
+    # aqui garantimos que usamos exatamente "PAUSED"
     mutate_resp = await mutate_campaign_status(customer_id, campaign_id, "PAUSED", access_token)
-    logging.info(f"[pause] Mutate response: {mutate_resp}")
-
-    # 2) Confirma o status após o mutate
-    new_status = await get_campaign_status(customer_id, campaign_id, access_token)
-    logging.info(f"[pause] Campaign {campaign_id} new status: {new_status}")
+    logging.info(f"[pause] Campaign {campaign_id} status set to PAUSED in customer {customer_id}")
 
     return {
         "success": True,
-        "customer_id": customer_id,
-        "campaign_id": campaign_id,
-        "mutate_response": mutate_resp,
-        "confirmed_status": new_status
+        "customer_id":  customer_id,
+        "campaign_id":  campaign_id,
+        "mutate_response": mutate_resp
     }
 
 @app.post("/resume_google_campaign")
 async def resume_google_campaign(payload: dict = Body(...)):
+    """
+    Reativa uma campanha definindo status = 'ENABLED'.
+    """
     logging.debug(f"[resume] Payload: {json.dumps(payload)}")
     refresh_token = payload.get("refresh_token")
     campaign_id   = payload.get("campaign_id")
     if not refresh_token or not campaign_id:
-        raise HTTPException(status_code=400, detail="É necessário 'refresh_token' e 'campaign_id'.")
+        raise HTTPException(400, "É necessário 'refresh_token' e 'campaign_id'.")
 
     access_token = await get_access_token(refresh_token)
     customer_id  = payload.get("customer_id") or await discover_customer_id(access_token)
 
-    # Reativa usando ENABLED
-    result = await mutate_campaign_status(customer_id, campaign_id, "ENABLED", access_token)
-    logging.info(f"[resume] Campanha {campaign_id} reativada na conta {customer_id}")
-
-    # Confirma status
-    confirmed = await get_campaign_status(customer_id, campaign_id, access_token)
-    logging.info(f"[resume] Campaign {campaign_id} confirmed status: {confirmed}")
+    mutate_resp = await mutate_campaign_status(customer_id, campaign_id, "ENABLED", access_token)
+    logging.info(f"[resume] Campaign {campaign_id} status set to ENABLED in customer {customer_id}")
 
     return {
         "success": True,
-        "customer_id": customer_id,
-        "campaign_id": campaign_id,
-        "mutate_response": result,
-        "confirmed_status": confirmed
+        "customer_id":  customer_id,
+        "campaign_id":  campaign_id,
+        "mutate_response": mutate_resp
     }
 
 if __name__ == "__main__":
