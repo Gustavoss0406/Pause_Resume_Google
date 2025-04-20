@@ -46,10 +46,10 @@ async def discover_customer_id(access_token: str) -> str:
             text = await resp.text()
             logging.debug(f"[discover] {resp.status} {text}")
             if resp.status != 200:
-                raise HTTPException(502, f"listAccessibleCustomers error: {text}")
+                raise HTTPException(502, f"Erro ao listar contas: {text}")
             names = json.loads(text).get("resourceNames", [])
             if not names:
-                raise HTTPException(502, "No accessible customers")
+                raise HTTPException(502, "Nenhuma conta acessível encontrada.")
             return names[0].split("/")[-1]
 
 async def get_campaign_status(customer_id: str, campaign_id: str, access_token: str) -> str:
@@ -70,10 +70,10 @@ async def get_campaign_status(customer_id: str, campaign_id: str, access_token: 
             text = await resp.text()
             logging.debug(f"[get_status] {resp.status} {text}")
             if resp.status != 200:
-                raise HTTPException(502, f"Status query error: {text}")
+                raise HTTPException(502, f"Erro na consulta de status: {text}")
             results = json.loads(text).get("results", [])
             if not results:
-                raise HTTPException(404, "Campaign not found")
+                raise HTTPException(404, "Campanha não encontrada.")
             return results[0]["campaign"]["status"]
 
 async def patch_campaign_status(customer_id: str, campaign_id: str, status: str, access_token: str):
@@ -91,7 +91,7 @@ async def patch_campaign_status(customer_id: str, campaign_id: str, status: str,
             text = await resp.text()
             logging.debug(f"[patch] {resp.status} {text}")
             if resp.status != 200:
-                raise HTTPException(resp.status, f"Patch error: {text}")
+                raise HTTPException(resp.status, f"Erro ao aplicar patch: {text}")
             return json.loads(text)
 
 @app.post("/pause_google_campaign")
@@ -99,43 +99,58 @@ async def pause_google_campaign(payload: dict = Body(...)):
     refresh_token = payload.get("refresh_token")
     campaign_id   = payload.get("campaign_id")
     if not refresh_token or not campaign_id:
-        raise HTTPException(400, "Need 'refresh_token' and 'campaign_id'")
+        raise HTTPException(400, "É necessário 'refresh_token' e 'campaign_id'")
+
     access_token = await get_access_token(refresh_token)
     customer_id  = payload.get("customer_id") or await discover_customer_id(access_token)
 
-    # 1) pausar
+    # 1) Pausar com PATCH -> status = "PAUSED"
     patch_resp = await patch_campaign_status(customer_id, campaign_id, "PAUSED", access_token)
     logging.debug(f"[pause] patch response: {patch_resp}")
 
-    # 2) confirmar
+    # 2) Confirmar que ficou PAUSED
     confirmed = await get_campaign_status(customer_id, campaign_id, access_token)
     logging.info(f"[pause] confirmed status: {confirmed}")
     if confirmed != "PAUSED":
-        raise HTTPException(500, f"Failed to pause: status is {confirmed}")
+        raise HTTPException(500, f"Falha ao pausar: status retornado = {confirmed}")
 
-    return {"success": True, "campaign_id": campaign_id, "confirmed_status": confirmed}
+    return {
+        "success": True,
+        "campaign_id": campaign_id,
+        "customer_id": customer_id,
+        "patch_response": patch_resp,
+        "confirmed_status": confirmed
+    }
 
 @app.post("/resume_google_campaign")
 async def resume_google_campaign(payload: dict = Body(...)):
     refresh_token = payload.get("refresh_token")
     campaign_id   = payload.get("campaign_id")
     if not refresh_token or not campaign_id:
-        raise HTTPException(400, "Need 'refresh_token' and 'campaign_id'")
+        raise HTTPException(400, "É necessário 'refresh_token' e 'campaign_id'")
+
     access_token = await get_access_token(refresh_token)
     customer_id  = payload.get("customer_id") or await discover_customer_id(access_token)
 
-    # 1) reativar
+    # 1) Reativar com PATCH -> status = "ENABLED"
     patch_resp = await patch_campaign_status(customer_id, campaign_id, "ENABLED", access_token)
     logging.debug(f"[resume] patch response: {patch_resp}")
 
-    # 2) confirmar
+    # 2) Confirmar que ficou ENABLED
     confirmed = await get_campaign_status(customer_id, campaign_id, access_token)
     logging.info(f"[resume] confirmed status: {confirmed}")
     if confirmed != "ENABLED":
-        raise HTTPException(500, f"Failed to resume: status is {confirmed}")
+        raise HTTPException(500, f"Falha ao reativar: status retornado = {confirmed}")
 
-    return {"success": True, "campaign_id": campaign_id, "confirmed_status": confirmed}
+    return {
+        "success": True,
+        "campaign_id": campaign_id,
+        "customer_id": customer_id,
+        "patch_response": patch_resp,
+        "confirmed_status": confirmed
+    }
 
 if __name__ == "__main__":
     import uvicorn
+    logging.info("Iniciando FastAPI (Google Ads pause/resume) na porta 8080")
     uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
