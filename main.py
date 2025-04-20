@@ -125,7 +125,7 @@ async def resume_google_campaign(payload: dict = Body(...)):
                 body = await resp.json()
                 logging.debug(f"[resume] listAccessibleCustomers → {body}")
                 if resp.status != 200 or not body.get("resourceNames"):
-                    raise HTTPException(502, detail=f"Cannot get customer_id: {body}")
+                    raise HTTPException(status_code=502, detail=f"Cannot get customer_id: {body}")
                 customer_id = body["resourceNames"][0].split("/")[1]
 
     # Faz PATCH para reativar
@@ -148,4 +148,4 @@ async def resume_google_campaign(payload: dict = Body(...)):
 if __name__ == "__main__":
     import uvicorn
     logging.info("Iniciando FastAPI (Google Ads) na porta 8080")
-    uvicorn.run("app:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
