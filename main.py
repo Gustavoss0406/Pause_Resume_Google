@@ -15,6 +15,7 @@ CLIENT_SECRET   = "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"
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 app = FastAPI()
 
+# CORS – ajuste as origens se precisar restringir mais
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://app.adstock.ai", "https://pauseresumegoogle-production.up.railway.app"],
@@ -102,7 +103,8 @@ async def resume_google_campaign(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="É necessário 'refresh_token' e 'campaign_id'.")
     access_token = await get_access_token(refresh_token)
     customer_id  = payload.get("customer_id") or await discover_customer_id(access_token)
-    result = await mutate_campaign_status(customer_id, campaign_id, "ACTIVE", access_token)
+    # ⬇️ Para reativar use "ENABLED" e não "ACTIVE"
+    result = await mutate_campaign_status(customer_id, campaign_id, "ENABLED", access_token)
     logging.info(f"[resume] Campanha {campaign_id} reativada na conta {customer_id}")
     return {"success": True, "customer_id": customer_id, "campaign_id": campaign_id, "response": result}
 
