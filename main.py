@@ -1,5 +1,6 @@
 import logging
 from fastapi import FastAPI, HTTPException, Body
+from fastapi.middleware.cors import CORSMiddleware
 import aiohttp
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
@@ -12,6 +13,15 @@ REDIRECT_URI    = "https://app.adstock.ai/dashboard"
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 app = FastAPI()
+
+# Habilita CORS para aceitar chamadas do seu frontend (ajuste se quiser restringir)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://app.adstock.ai", "https://pauseresumegoogle-production.up.railway.app"],
+    allow_credentials=True,
+    allow_methods=["*"],   # GET, POST, OPTIONS etc.
+    allow_headers=["*"],
+)
 
 @app.post("/pause_google_campaign")
 async def pause_google_campaign(payload: dict = Body(...)):
