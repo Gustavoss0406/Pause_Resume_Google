@@ -147,5 +147,5 @@ async def resume_google_campaign(payload: dict = Body(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    logging.info("Iniciando FastAPI (Google Ads) na porta 8090")
-    uvicorn.run("app:app", host="0.0.0.0", port=8090, reload=True)
+    logging.info("Iniciando FastAPI (Google Ads) na porta 8080")
+    uvicorn.run("app:app", host="0.0.0.0", port=8080, reload=True)
